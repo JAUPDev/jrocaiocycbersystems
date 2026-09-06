@@ -1,0 +1,724 @@
+Folder structure
+text
+jroc-backend/
+├─ src/
+│  ├─ config/
+│  │  ├─ env.ts
+│  │  └─ db.ts
+│  ├─ domain/
+│  │  ├─ missions/
+│  │  │  ├─ mission.model.ts
+│  │  │  ├─ mission.types.ts
+│  │  │  └─ mission.service.ts
+│  │  ├─ tasks/
+│  │  │  ├─ task.model.ts
+│  │  │  ├─ task.types.ts
+│  │  │  └─ task.service.ts
+│  │  ├─ agents/
+│  │  │  ├─ agent.model.ts
+│  │  │  ├─ agent.types.ts
+│  │  │  └─ agent.service.ts
+│  │  └─ orchestrator/
+│  │     ├─ orchestrator.service.ts
+│  │     └─ orchestrator.types.ts
+│  ├─ infra/
+│  │  ├─ hermes.client.ts
+│  │  ├─ kamatera.client.ts
+│  │  └─ docker.client.ts
+│  ├─ api/
+│  │  ├─ index.ts
+│  │  ├─ missions.routes.ts
+│  │  ├─ tasks.routes.ts
+│  │  └─ agents.routes.ts
+│  ├─ shared/
+│  │  ├─ errors.ts
+│  │  └─ logger.ts
+│  └─ server.ts
+├─ prisma/
+│  └─ schema.prisma
+├─ package.json
+├─ tsconfig.json
+└─ .env
+Prisma schema (missions, tasks, agents)
+ts
+// prisma/schema.prisma
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum MissionStatus {
+  CREATED
+  PLANNING
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  READY_TO_DEPLOY
+  COMPLETED
+  PAUSED
+  FAILED
+}
+
+enum TaskStatus {
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  COMPLETED
+  FAILED
+}
+
+enum AgentRole {
+  RESEARCH
+  PRODUCT
+  UI_UX
+  FRONTEND
+  BACKEND
+  DATABASE
+  QA
+}
+
+model Mission {
+  id           String        @id @default(cuid())
+  name         String
+  description  String?
+  status       MissionStatus @default(CREATED)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  tasks        Task[]
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  missionId    String
+  mission      Mission    @relation(fields: [missionId], references: [id])
+  title        String
+  description  String?
+  status       TaskStatus @default(PENDING)
+  agentId      String?
+  agent        Agent?     @relation(fields: [agentId], references: [id])
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+model Agent {
+  id        String    @id @default(cuid())
+  name      String
+  role      AgentRole
+  active    Boolean   @default(true)
+  tasks     Task[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+Config: env + db
+ts
+// src/config/env.ts
+import dotenv from "dotenv";
+dotenv.config();
+
+export const env = {
+  port: process.env.PORT || "4000",
+  databaseUrl: process.env.DATABASE_URL || "",
+  hermesApiKey: process.env.HERMES_API_KEY || "",
+  kamateraToken: process.env.KAMATERA_TOKEN || "",
+  dockerHost: process.env.DOCKER_HOST || "unix:///var/run/docker.sock",
+};
+ts
+// src/config/db.ts
+import { PrismaClient } from "@prisma/client";
+
+export const prisma = new PrismaClient();
+Shared logger + errors
+ts
+// src/shared/logger.ts
+export const logger = {
+  info: (msg: string, meta?: any) => console.log("[INFO]", msg, meta || ""),
+  error: (msg: string, meta?: any) => console.error("[ERROR]", msg, meta || ""),
+};
+ts
+// src/shared/errors.ts
+export class AppError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode = 400) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+Domain: Missions
+Types
+ts
+// src/domain/missions/mission.types.ts
+import { MissionStatus } from "@prisma/client";
+
+export interface CreateMissionInput {
+  name: string;
+  description?: string;
+}
+
+export interface MissionDTO {
+  id: string;
+  name: string;
+  description?: string;
+  status: MissionStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+Service
+ts
+// src/domain/missions/mission.service.ts
+import { prisma, } from "../../config/db";
+import { MissionStatus } from "@prisma/client";
+import { CreateMissionInput, MissionDTO } from "./mission.types";
+import { logger } from "../../shared/logger";
+
+export class MissionService {
+  async createMission(input: CreateMissionInput): Promise<MissionDTO> {
+    const mission = await prisma.mission.create({
+      data: {
+        name: input.name,
+        description: input.description,
+        status: MissionStatus.CREATED,
+      },
+    });
+
+    logger.info("Mission created", { missionId: mission.id });
+
+    return mission;
+  }
+
+  async updateStatus(id: string, status: MissionStatus): Promise<MissionDTO> {
+    const mission = await prisma.mission.update({
+      where: { id },
+      data: { status },
+    });
+
+    logger.info("Mission status updated", { missionId: id, status });
+
+    return mission;
+  }
+
+  async getMission(id: string): Promise<MissionDTO | null> {
+    return prisma.mission.findUnique({
+      where: { id },
+      include: { tasks: true },
+    }) as any;
+  }
+
+  async listMissions(): Promise<MissionDTO[]> {
+    return prisma.mission.findMany({
+      orderBy: { createdAt: "desc" },
+    }) as any;
+  }
+}
+
+export const missionService = new MissionService();
+Domain: Tasks
+Types
+ts
+// src/domain/tasks/task.types.ts
+import { TaskStatus } from "@prisma/client";
+
+export interface CreateTaskInput {
+  missionId: string;
+  title: string;
+  description?: string;
+  agentId?: string;
+}
+
+export interface TaskDTO {
+  id: string;
+  missionId: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  agentId?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+Service
+ts
+// src/domain/tasks/task.service.ts
+import { prisma } from "../../config/db";
+import { TaskStatus } from "@prisma/client";
+import { CreateTaskInput, TaskDTO } from "./task.types";
+import { logger } from "../../shared/logger";
+
+export class TaskService {
+  async createTask(input: CreateTaskInput): Promise<TaskDTO> {
+    const task = await prisma.task.create({
+      data: {
+        missionId: input.missionId,
+        title: input.title,
+        description: input.description,
+        agentId: input.agentId,
+        status: TaskStatus.PENDING,
+      },
+    });
+
+    logger.info("Task created", { taskId: task.id, missionId: input.missionId });
+
+    return task;
+  }
+
+  async assignTask(taskId: string, agentId: string): Promise<TaskDTO> {
+    const task = await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        agentId,
+        status: TaskStatus.ASSIGNED,
+      },
+    });
+
+    logger.info("Task assigned", { taskId, agentId });
+
+    return task;
+  }
+
+  async updateStatus(taskId: string, status: TaskStatus): Promise<TaskDTO> {
+    const task = await prisma.task.update({
+      where: { id: taskId },
+      data: { status },
+    });
+
+    logger.info("Task status updated", { taskId, status });
+
+    return task;
+  }
+
+  async listTasksByMission(missionId: string): Promise<TaskDTO[]> {
+    return prisma.task.findMany({
+      where: { missionId },
+      orderBy: { createdAt: "asc" },
+    }) as any;
+  }
+}
+
+export const taskService = new TaskService();
+Domain: Agents (Swarm Agent System)
+Types
+ts
+// src/domain/agents/agent.types.ts
+import { AgentRole } from "@prisma/client";
+
+export interface CreateAgentInput {
+  name: string;
+  role: AgentRole;
+}
+
+export interface AgentDTO {
+  id: string;
+  name: string;
+  role: AgentRole;
+  active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+Service
+ts
+// src/domain/agents/agent.service.ts
+import { prisma } from "../../config/db";
+import { AgentRole } from "@prisma/client";
+import { CreateAgentInput, AgentDTO } from "./agent.types";
+import { logger } from "../../shared/logger";
+
+export class AgentService {
+  async createAgent(input: CreateAgentInput): Promise<AgentDTO> {
+    const agent = await prisma.agent.create({
+      data: {
+        name: input.name,
+        role: input.role,
+      },
+    });
+
+    logger.info("Agent created", { agentId: agent.id, role: agent.role });
+
+    return agent;
+  }
+
+  async listAgents(role?: AgentRole): Promise<AgentDTO[]> {
+    return prisma.agent.findMany({
+      where: role ? { role } : {},
+      orderBy: { createdAt: "asc" },
+    }) as any;
+  }
+
+  async getAvailableAgent(role: AgentRole): Promise<AgentDTO | null> {
+    const agent = await prisma.agent.findFirst({
+      where: { role, active: true },
+      orderBy: { createdAt: "asc" },
+    });
+
+    return agent as any;
+  }
+
+  async setActive(agentId: string, active: boolean): Promise<AgentDTO> {
+    const agent = await prisma.agent.update({
+      where: { id: agentId },
+      data: { active },
+    });
+
+    logger.info("Agent active state updated", { agentId, active });
+
+    return agent;
+  }
+}
+
+export const agentService = new AgentService();
+Orchestrator: Types
+ts
+// src/domain/orchestrator/orchestrator.types.ts
+import { MissionDTO } from "../missions/mission.types";
+
+export interface BuildMissionInput {
+  name: string;
+  description?: string;
+}
+
+export interface OrchestratorStatus {
+  mission: MissionDTO | null;
+  summary: string;
+  pendingApprovals: number;
+  readyToDeploy: boolean;
+}
+Orchestrator Service (engine + pipeline)
+This is where Orchestrator Architecture + Mission/Task Engine + Swarm Agent System meet.
+
+ts
+// src/domain/orchestrator/orchestrator.service.ts
+import { missionService } from "../missions/mission.service";
+import { taskService } from "../tasks/task.service";
+import { agentService } from "../agents/agent.service";
+import { MissionStatus, TaskStatus, AgentRole } from "@prisma/client";
+import { BuildMissionInput, OrchestratorStatus } from "./orchestrator.types";
+import { logger } from "../../shared/logger";
+
+export class OrchestratorService {
+  /**
+   * User: "J-ROC, build me this app."
+   * Creates mission + initial task blueprint.
+   */
+  async createBuildMission(input: BuildMissionInput) {
+    // 1. Create mission
+    const mission = await missionService.createMission({
+      name: input.name,
+      description: input.description,
+    });
+
+    // 2. Move mission to PLANNING
+    await missionService.updateStatus(mission.id, MissionStatus.PLANNING);
+
+    // 3. Generate initial tasks (pipeline: intent → blueprint → tasks)
+    // Example: basic wholesale marketplace blueprint
+    const blueprintTasks = [
+      {
+        title: "Research: wholesale marketplace requirements",
+        description: "Gather domain requirements, user roles, and core flows.",
+        role: AgentRole.RESEARCH,
+      },
+      {
+        title: "Product: define feature set and roadmap",
+        description: "Translate research into features, MVP scope, and roadmap.",
+        role: AgentRole.PRODUCT,
+      },
+      {
+        title: "UI/UX: design core screens and flows",
+        description: "Create wireframes for onboarding, catalog, cart, checkout, admin.",
+        role: AgentRole.UI_UX,
+      },
+      {
+        title: "Frontend: implement UI components",
+        description: "Build React components for main flows.",
+        role: AgentRole.FRONTEND,
+      },
+      {
+        title: "Backend: design APIs and services",
+        description: "Define endpoints, business logic, and integration points.",
+        role: AgentRole.BACKEND,
+      },
+      {
+        title: "Database: design schema",
+        description: "Model products, orders, users, permissions.",
+        role: AgentRole.DATABASE,
+      },
+      {
+        title: "QA: test core flows",
+        description: "Validate main user journeys and edge cases.",
+        role: AgentRole.QA,
+      },
+    ];
+
+    for (const bt of blueprintTasks) {
+      const agent = await agentService.getAvailableAgent(bt.role);
+
+      await taskService.createTask({
+        missionId: mission.id,
+        title: bt.title,
+        description: bt.description,
+        agentId: agent?.id,
+      });
+    }
+
+    logger.info("Build mission initialized with blueprint tasks", {
+      missionId: mission.id,
+      taskCount: blueprintTasks.length,
+    });
+
+    // 4. Move mission to IN_PROGRESS
+    await missionService.updateStatus(mission.id, MissionStatus.IN_PROGRESS);
+
+    return mission;
+  }
+
+  /**
+   * User: "J-ROC, what's the status?"
+   * Returns a human-friendly summary of mission + tasks.
+   */
+  async getMissionStatus(missionId: string): Promise<OrchestratorStatus> {
+    const mission = await missionService.getMission(missionId);
+    if (!mission) {
+      return {
+        mission: null,
+        summary: "No mission found.",
+        pendingApprovals: 0,
+        readyToDeploy: false,
+      };
+    }
+
+    const tasks = await taskService.listTasksByMission(missionId);
+
+    const pendingApprovals = tasks.filter(
+      (t) => t.status === TaskStatus.AWAITING_APPROVAL
+    ).length;
+
+    const completed = tasks.filter((t) => t.status === TaskStatus.COMPLETED).length;
+    const total = tasks.length;
+
+    const readyToDeploy =
+      mission.status === MissionStatus.READY_TO_DEPLOY ||
+      (completed === total && total > 0);
+
+    const summary = `Mission "${mission.name}" is ${mission.status}. ${completed}/${total} tasks completed. ${pendingApprovals} awaiting approval.`;
+
+    return {
+      mission: mission as any,
+      summary,
+      pendingApprovals,
+      readyToDeploy,
+    };
+  }
+
+  /**
+   * Pipeline step: mark tasks as awaiting approval when agents finish.
+   */
+  async markTaskAwaitingApproval(taskId: string) {
+    await taskService.updateStatus(taskId, TaskStatus.AWAITING_APPROVAL);
+  }
+
+  /**
+   * Pipeline step: approve task and check if mission can move forward.
+   */
+  async approveTask(taskId: string, missionId: string) {
+    await taskService.updateStatus(taskId, TaskStatus.COMPLETED);
+
+    const tasks = await taskService.listTasksByMission(missionId);
+    const allCompleted = tasks.every((t) => t.status === TaskStatus.COMPLETED);
+
+    if (allCompleted) {
+      await missionService.updateStatus(missionId, MissionStatus.READY_TO_DEPLOY);
+      logger.info("Mission ready to deploy", { missionId });
+    }
+  }
+
+  /**
+   * Pause / resume mission.
+   */
+  async pauseMission(missionId: string) {
+    await missionService.updateStatus(missionId, MissionStatus.PAUSED);
+  }
+
+  async resumeMission(missionId: string) {
+    await missionService.updateStatus(missionId, MissionStatus.IN_PROGRESS);
+  }
+}
+
+export const orchestratorService = new OrchestratorService();
+Infra clients (stubs for now)
+ts
+// src/infra/hermes.client.ts
+import { env } from "../config/env";
+
+export class HermesClient {
+  async callModel(prompt: string): Promise<string> {
+    // Stub: integrate with Hermes/Qwen runtime
+    return `Hermes response to: ${prompt}`;
+  }
+}
+
+export const hermesClient = new HermesClient();
+ts
+// src/infra/kamatera.client.ts
+import { env } from "../config/env";
+
+export class KamateraClient {
+  async getStatus() {
+    // Stub: call Kamatera API for VPS status
+    return { connected: true, name: "Kamatera VPS" };
+  }
+}
+
+export const kamateraClient = new KamateraClient();
+ts
+// src/infra/docker.client.ts
+import { env } from "../config/env";
+
+export class DockerClient {
+  async getStatus() {
+    // Stub: check Docker daemon
+    return { ready: true };
+  }
+}
+
+export const dockerClient = new DockerClient();
+API routes
+Missions routes
+ts
+// src/api/missions.routes.ts
+import { Router } from "express";
+import { orchestratorService } from "../domain/orchestrator/orchestrator.service";
+import { missionService } from "../domain/missions/mission.service";
+
+const router = Router();
+
+// POST /missions/build
+router.post("/build", async (req, res, next) => {
+  try {
+    const { name, description } = req.body;
+    const mission = await orchestratorService.createBuildMission({ name, description });
+    res.status(201).json(mission);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /missions/:id/status
+router.get("/:id/status", async (req, res, next) => {
+  try {
+    const status = await orchestratorService.getMissionStatus(req.params.id);
+    res.json(status);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /missions
+router.get("/", async (req, res, next) => {
+  try {
+    const missions = await missionService.listMissions();
+    res.json(missions);
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
+Agents routes
+ts
+// src/api/agents.routes.ts
+import { Router } from "express";
+import { agentService } from "../domain/agents/agent.service";
+import { AgentRole } from "@prisma/client";
+
+const router = Router();
+
+// POST /agents
+router.post("/", async (req, res, next) => {
+  try {
+    const { name, role } = req.body;
+    const agent = await agentService.createAgent({
+      name,
+      role: role as AgentRole,
+    });
+    res.status(201).json(agent);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /agents
+router.get("/", async (req, res, next) => {
+  try {
+    const { role } = req.query;
+    const agents = await agentService.listAgents(
+      role ? (role as AgentRole) : undefined
+    );
+    res.json(agents);
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
+API index
+ts
+// src/api/index.ts
+import { Router } from "express";
+import missionsRoutes from "./missions.routes";
+import agentsRoutes from "./agents.routes";
+
+const api = Router();
+
+api.use("/missions", missionsRoutes);
+api.use("/agents", agentsRoutes);
+
+export default api;
+Server bootstrap
+ts
+// src/server.ts
+import express from "express";
+import cors from "cors";
+import api from "./api";
+import { env } from "./config/env";
+import { logger } from "./shared/logger";
+import { AppError } from "./shared/errors";
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.use("/api", api);
+
+// Error handler
+app.use(
+  (
+    err: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    logger.error("Unhandled error", err);
+    const status = err instanceof AppError ? err.statusCode : 500;
+    res.status(status).json({ error: err.message || "Internal server error" });
+  }
+);
+
+app.listen(env.port, () => {
+  logger.info(`J-ROC backend running on port ${env.port}`);
+});
+How this maps to your operating model
+“J-ROC, build me this app.”  
+→ POST /api/missions/build  
+→ OrchestratorService.createBuildMission()  
+→ Mission + blueprint tasks + agent assignment + status IN_PROGRESS.
+
+“J-ROC, what’s the status?”  
+→ GET /api/missions/:id/status  
+→ OrchestratorService.getMissionStatus()  
+→ Summary + approvals + deploy readiness.
+
+Swarm Agent System  
+→ AgentService + TaskService.assignTask() + roles RESEARCH/PRODUCT/UI_UX/FRONTEND/BACKEND/DATABASE/QA.
