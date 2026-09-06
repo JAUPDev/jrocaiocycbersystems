@@ -1,0 +1,462 @@
+Got you—**full frontend first**, wired for:
+
+- AI‑style marketing copy  
+- Legal/liability footer  
+- Contact + FAQ pages  
+- Clean React/Vite structure  
+
+I’ll give you a **clone‑ready frontend** you can drop into `frontend/` and run.
+
+---
+
+### 1. Project structure
+
+```text
+jroc-frontend/
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── index.html
+└── src/
+    ├── main.tsx
+    ├── App.tsx
+    ├── styles/
+    │   ├── globals.css
+    │   └── hero.css
+    ├── components/
+    │   ├── Navbar.tsx
+    │   ├── Hero.tsx
+    │   ├── Footer.tsx
+    └── pages/
+        ├── Home.tsx
+        ├── Contact.tsx
+        ├── FAQ.tsx
+        ├── Privacy.tsx
+        └── Terms.tsx
+```
+
+---
+
+### 2. package.json
+
+```json
+{
+  "name": "jroc-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.0.0"
+  }
+}
+```
+
+---
+
+### 3. Vite + entry
+
+**vite.config.ts**
+
+```ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+});
+```
+
+**src/main.tsx**
+
+```tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./styles/globals.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+---
+
+### 4. Global styles
+
+**src/styles/globals.css**
+
+```css
+body {
+  margin: 0;
+  background: #05070a;
+  color: #e5f7ff;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+a {
+  color: #00c8ff;
+  text-decoration: none;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1, h2, h3 {
+  margin: 0 0 12px 0;
+}
+```
+
+**src/styles/hero.css**
+
+```css
+.hero {
+  padding: 80px 24px;
+  text-align: center;
+  background: linear-gradient(180deg, #001020 0%, #000000 100%);
+}
+
+.hero h1 {
+  font-size: 42px;
+  font-weight: 800;
+  color: #00c8ff;
+}
+
+.hero p {
+  font-size: 18px;
+  color: #7aa8ff;
+  max-width: 600px;
+  margin: 16px auto;
+}
+```
+
+---
+
+### 5. Core layout: App + Navbar + Footer
+
+**src/App.tsx**
+
+```tsx
+import React from "react";
+import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
+import Home from "./pages/Home";
+import Contact from "./pages/Contact";
+import FAQ from "./pages/FAQ";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+
+const App: React.FC = () => {
+  const path = window.location.pathname;
+
+  let Page: React.FC;
+  switch (path) {
+    case "/contact":
+      Page = Contact;
+      break;
+    case "/faq":
+      Page = FAQ;
+      break;
+    case "/privacy":
+      Page = Privacy;
+      break;
+    case "/terms":
+      Page = Terms;
+      break;
+    default:
+      Page = Home;
+  }
+
+  return (
+    <>
+      <Navbar />
+      <Page />
+      <Footer />
+    </>
+  );
+};
+
+export default App;
+```
+
+**src/components/Navbar.tsx**
+
+```tsx
+import React from "react";
+
+const Navbar: React.FC = () => {
+  return (
+    <nav
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "16px 24px",
+        borderBottom: "1px solid #1a2330",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 20 }}>J‑Roc Cybersystems</div>
+
+      <div style={{ display: "flex", gap: "24px" }}>
+        <a href="/">Home</a>
+        <a href="/contact">Contact</a>
+        <a href="/faq">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </div>
+    </nav>
+  );
+};
+
+export default Navbar;
+```
+
+**src/components/Footer.tsx**
+
+```tsx
+import React from "react";
+
+const Footer: React.FC = () => {
+  return (
+    <footer
+      style={{
+        marginTop: 40,
+        padding: "24px",
+        borderTop: "1px solid #1a2330",
+        fontSize: 13,
+        color: "#7aa8ff",
+      }}
+    >
+      <div className="container">
+        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div>
+            <div>© 2026 J‑Roc Cybersystems. All rights reserved.</div>
+            <div style={{ marginTop: 8 }}>
+              <a href="/contact">Contact Us</a> ·{" "}
+              <a href="/faq">FAQs</a> ·{" "}
+              <a href="/privacy">Privacy Policy</a> ·{" "}
+              <a href="/terms">Terms of Service</a>
+            </div>
+          </div>
+
+          <div style={{ maxWidth: 420 }}>
+            <strong>Liability Notice:</strong>
+            <div style={{ marginTop: 4 }}>
+              This website and its content are provided for informational and experimental purposes only.
+              Nothing here is legal, financial, or professional advice. You are solely responsible for
+              how you use any information or tools described. Always consult qualified professionals
+              before making decisions based on AI‑generated output.
+            </div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+};
+
+export default Footer;
+```
+
+---
+
+### 6. Pages with AI‑style wording
+
+**src/components/Hero.tsx**
+
+```tsx
+import React from "react";
+import "../styles/hero.css";
+
+const Hero: React.FC = () => {
+  return (
+    <section className="hero">
+      <h1>AI‑Driven Intelligence, Tailored for You.</h1>
+      <p>
+        J‑Roc Cybersystems gives you automated insight, not automated liability—tools that help you think,
+        not tell you what to do.
+      </p>
+    </section>
+  );
+};
+
+export default Hero;
+```
+
+**src/pages/Home.tsx**
+
+```tsx
+import React from "react";
+import Hero from "../components/Hero";
+
+const Home: React.FC = () => {
+  return (
+    <>
+      <Hero />
+      <div className="container">
+        <h2>What This Platform Does</h2>
+        <p>
+          J‑Roc Cybersystems is built to streamline how you look at information: threat signals, open‑source
+          intelligence, and legal context. The system surfaces patterns, summaries, and briefs so you can
+          make your own calls with more clarity and less noise.
+        </p>
+
+        <h2 style={{ marginTop: 24 }}>How You Should Use It</h2>
+        <p>
+          Everything generated by this platform—reports, summaries, recommendations—is AI‑assisted content.
+          It’s meant to be a starting point, not a final verdict. You stay in control. You decide what’s
+          useful, what’s accurate, and what gets acted on.
+        </p>
+
+        <h2 style={{ marginTop: 24 }}>No Hidden Promises</h2>
+        <p>
+          We don’t guarantee outcomes, and we don’t pretend AI is magic. This is a tool. It can help you
+          see more, faster—but it doesn’t replace your judgment, your experience, or professional advice.
+        </p>
+      </div>
+    </>
+  );
+};
+
+export default Home;
+```
+
+**src/pages/Contact.tsx**
+
+```tsx
+import React from "react";
+
+const Contact: React.FC = () => {
+  return (
+    <div className="container">
+      <h2>Contact Us</h2>
+      <p>
+        Have questions about J‑Roc Cybersystems, partnerships, or technical support? Reach out and we’ll
+        get back to you as soon as we can.
+      </p>
+
+      <p style={{ marginTop: 16 }}>
+        Email: <a href="mailto:info@jroccybersystems.com">info@jroccybersystems.com</a>
+      </p>
+    </div>
+  );
+};
+
+export default Contact;
+```
+
+**src/pages/FAQ.tsx**
+
+```tsx
+import React from "react";
+
+const FAQ: React.FC = () => {
+  return (
+    <div className="container">
+      <h2>Frequently Asked Questions</h2>
+
+      <h3 style={{ marginTop: 16 }}>Is this legal advice?</h3>
+      <p>
+        No. Nothing on this site or generated by the platform is legal advice. It’s AI‑assisted content
+        meant to help you think through scenarios, not replace a licensed professional.
+      </p>
+
+      <h3 style={{ marginTop: 16 }}>Can I rely on the AI output?</h3>
+      <p>
+        You should treat all AI output as draft material. Double‑check facts, verify sources, and consult
+        professionals before acting on anything important.
+      </p>
+
+      <h3 style={{ marginTop: 16 }}>Who is responsible for decisions I make?</h3>
+      <p>
+        You are. J‑Roc Cybersystems provides tools and information, but you remain fully responsible for
+        any decisions, actions, or outcomes.
+      </p>
+    </div>
+  );
+};
+
+export default FAQ;
+```
+
+**src/pages/Privacy.tsx**
+
+```tsx
+import React from "react";
+
+const Privacy: React.FC = () => {
+  return (
+    <div className="container">
+      <h2>Privacy Policy</h2>
+      <p>
+        This site may collect basic technical information (such as logs and usage data) to keep the
+        platform running and improve performance. Any data you provide is handled with care and is not
+        sold to third parties.
+      </p>
+      <p style={{ marginTop: 16 }}>
+        Always avoid pasting highly sensitive personal, financial, or legal information into AI tools.
+      </p>
+    </div>
+  );
+};
+
+export default Privacy;
+```
+
+**src/pages/Terms.tsx**
+
+```tsx
+import React from "react";
+
+const Terms: React.FC = () => {
+  return (
+    <div className="container">
+      <h2>Terms of Service</h2>
+      <p>
+        By using this site and any tools connected to J‑Roc Cybersystems, you agree that all content is
+        provided “as‑is” without guarantees. You understand that AI‑generated output may be incomplete,
+        inaccurate, or outdated.
+      </p>
+      <p style={{ marginTop: 16 }}>
+        You accept full responsibility for how you use the platform and any decisions you make based on
+        its output. J‑Roc Cybersystems is not liable for losses, damages, or consequences arising from
+        your use of the system.
+      </p>
+    </div>
+  );
+};
+
+export default Terms;
+```
+
+---
+
+### 7. Run it
+
+From `jroc-frontend/`:
+
+```bash
+npm install
+npm run dev
+```
+
+This gives you:
+
+- AI‑style copy that clearly says “this is a tool, not advice”  
+- Strong liability language in footer + FAQ + Terms  
+- Standard bottom‑of‑site links (Contact, FAQ, Privacy, Terms)  
+
+If you want, next step can be: **hook this frontend into your existing J‑Roc backend and Hermis stack**.
