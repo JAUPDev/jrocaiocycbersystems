@@ -1,0 +1,376 @@
+### Cases dashboard overview
+
+Here’s a **full frontend Cases Dashboard**, wired to your `/api/v1/cases` and `/api/v1/cases/{id}` endpoints, ready to drop into your existing React/Vite frontend.
+
+---
+
+### 1. Add routes and pages
+
+Update your structure:
+
+```text
+src/
+  components/
+    Navbar.tsx
+  pages/
+    Home.tsx
+    CasesDashboard.tsx
+    CaseDetail.tsx
+```
+
+---
+
+### 2. Navbar link
+
+**`src/components/Navbar.tsx`**
+
+```tsx
+import React from "react";
+
+const Navbar: React.FC = () => {
+  return (
+    <nav
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "16px 24px",
+        borderBottom: "1px solid #1a2330",
+      }}
+    >
+      <div style={{ fontWeight: 700, fontSize: 20 }}>J‑Roc Cybersystems</div>
+
+      <div style={{ display: "flex", gap: "24px" }}>
+        <a href="/">Home</a>
+        <a href="/cases">Cases</a>
+        <a href="/contact">Contact</a>
+        <a href="/faq">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </div>
+    </nav>
+  );
+};
+
+export default Navbar;
+```
+
+---
+
+### 3. App routing
+
+**`src/App.tsx`**
+
+```tsx
+import React from "react";
+import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
+import Home from "./pages/Home";
+import Contact from "./pages/Contact";
+import FAQ from "./pages/FAQ";
+import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import CasesDashboard from "./pages/CasesDashboard";
+import CaseDetail from "./pages/CaseDetail";
+
+const App: React.FC = () => {
+  const path = window.location.pathname;
+
+  let Page: React.FC;
+
+  if (path === "/contact") Page = Contact;
+  else if (path === "/faq") Page = FAQ;
+  else if (path === "/privacy") Page = Privacy;
+  else if (path === "/terms") Page = Terms;
+  else if (path === "/cases") Page = CasesDashboard;
+  else if (path.startsWith("/cases/")) Page = CaseDetail;
+  else Page = Home;
+
+  return (
+    <>
+      <Navbar />
+      <Page />
+      <Footer />
+    </>
+  );
+};
+
+export default App;
+```
+
+---
+
+### 4. Cases dashboard (list view)
+
+**`src/pages/CasesDashboard.tsx`**
+
+```tsx
+import React, { useEffect, useState } from "react";
+
+interface Case {
+  id: number;
+  title: string;
+  description: string;
+  status: string;
+  created_at: string;
+}
+
+const CasesDashboard: React.FC = () => {
+  const [cases, setCases] = useState<Case[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadCases = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const res = await fetch("http://localhost:8000/api/v1/cases", {
+        headers: {
+          // if you use JWT, drop it here:
+          // Authorization: `Bearer ${localStorage.getItem("jroc_token") || ""}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to load cases (${res.status})`);
+      }
+
+      const data = await res.json();
+      setCases(data);
+    } catch (e: any) {
+      setError(e.message || "Error loading cases");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCases();
+  }, []);
+
+  return (
+    <div className="container">
+      <h2>Cases Dashboard</h2>
+      <p>
+        These are the intelligence cases created by the system—each one a record of OSINT, legal context,
+        and AI‑generated summaries. Use them as references, not as final answers.
+      </p>
+
+      {loading && <p style={{ marginTop: 16 }}>Loading cases…</p>}
+      {error && <p style={{ marginTop: 16, color: "#ff6b6b" }}>{error}</p>}
+
+      {!loading && !error && cases.length === 0 && (
+        <p style={{ marginTop: 16 }}>No cases yet. Run a core intel cycle to create one.</p>
+      )}
+
+      {!loading && !error && cases.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          {cases.map((c) => (
+            <div
+              key={c.id}
+              style={{
+                padding: 16,
+                border: "1px solid #1a2330",
+                borderRadius: 6,
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div>
+                  <strong>{c.title}</strong>
+                  <div style={{ fontSize: 12, color: "#7aa8ff" }}>
+                    Status: {c.status} · Created: {new Date(c.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <a href={`/cases/${c.id}`} style={{ fontSize: 13 }}>
+                  View details →
+                </a>
+              </div>
+
+              <p style={{ marginTop: 8, fontSize: 14 }}>{c.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CasesDashboard;
+```
+
+---
+
+### 5. Case detail view
+
+**`src/pages/CaseDetail.tsx`**
+
+```tsx
+import React, { useEffect, useState } from "react";
+
+interface Action {
+  id: number;
+  tool_name: string;
+  category: string;
+  input_payload: string;
+  created_at: string;
+}
+
+interface Result {
+  id: number;
+  action_id: number;
+  summary_text: string;
+  raw_data: string;
+  created_at: string;
+}
+
+interface CaseDetailData {
+  case: {
+    id: number;
+    title: string;
+    description: string;
+    status: string;
+    created_at: string;
+  };
+  actions: Action[];
+  results: Result[];
+  osint: any[];
+  legal: any[];
+}
+
+const CaseDetail: React.FC = () => {
+  const [data, setData] = useState<CaseDetailData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const caseId = parseInt(window.location.pathname.split("/")[2] || "0", 10);
+
+  const loadCase = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const res = await fetch(`http://localhost:8000/api/v1/cases/${caseId}`, {
+        headers: {
+          // Authorization: `Bearer ${localStorage.getItem("jroc_token") || ""}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Failed to load case (${res.status})`);
+      }
+
+      const json = await res.json();
+      setData(json);
+    } catch (e: any) {
+      setError(e.message || "Error loading case");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isNaN(caseId)) {
+      loadCase();
+    } else {
+      setError("Invalid case ID");
+      setLoading(false);
+    }
+  }, [caseId]);
+
+  if (loading) {
+    return (
+      <div className="container">
+        <h2>Case Details</h2>
+        <p>Loading…</p>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="container">
+        <h2>Case Details</h2>
+        <p style={{ color: "#ff6b6b" }}>{error || "Unable to load case."}</p>
+      </div>
+    );
+  }
+
+  const { case: c, actions, results, osint, legal } = data;
+
+  return (
+    <div className="container">
+      <h2>Case: {c.title}</h2>
+      <p>{c.description}</p>
+      <p style={{ fontSize: 13, color: "#7aa8ff" }}>
+        Status: {c.status} · Created: {new Date(c.created_at).toLocaleString()}
+      </p>
+
+      <h3 style={{ marginTop: 24 }}>Actions</h3>
+      {actions.length === 0 && <p>No actions recorded.</p>}
+      {actions.length > 0 && (
+        <ul style={{ paddingLeft: 16 }}>
+          {actions.map((a) => (
+            <li key={a.id} style={{ marginBottom: 8 }}>
+              <strong>{a.tool_name}</strong> ({a.category}) ·{" "}
+              <span style={{ fontSize: 12 }}>
+                {new Date(a.created_at).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h3 style={{ marginTop: 24 }}>Results (AI Summaries)</h3>
+      {results.length === 0 && <p>No results recorded.</p>}
+      {results.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {results.map((r) => (
+            <div
+              key={r.id}
+              style={{
+                border: "1px solid #1a2330",
+                borderRadius: 6,
+                padding: 12,
+                marginBottom: 10,
+              }}
+            >
+              <div style={{ fontSize: 12, color: "#7aa8ff" }}>
+                Result #{r.id} · {new Date(r.created_at).toLocaleString()}
+              </div>
+              <p style={{ marginTop: 6, fontSize: 14 }}>{r.summary_text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h3 style={{ marginTop: 24 }}>OSINT Data</h3>
+      {osint.length === 0 && <p>No OSINT records.</p>}
+      {osint.length > 0 && (
+        <pre style={{ marginTop: 8, fontSize: 12, background: "#05070a", padding: 12 }}>
+          {JSON.stringify(osint, null, 2)}
+        </pre>
+      )}
+
+      <h3 style={{ marginTop: 24 }}>Legal Context</h3>
+      {legal.length === 0 && <p>No legal records.</p>}
+      {legal.length > 0 && (
+        <pre style={{ marginTop: 8, fontSize: 12, background: "#05070a", padding: 12 }}>
+          {JSON.stringify(legal, null, 2)}
+        </pre>
+      )}
+
+      <p style={{ marginTop: 24, fontSize: 12, color: "#7aa8ff" }}>
+        Reminder: All summaries and data shown here are AI‑assisted and informational only. They are not
+        legal, financial, or professional advice. You are responsible for how you interpret and use them.
+      </p>
+    </div>
+  );
+};
+
+export default CaseDetail;
+```
+
+---
+
+You now have a **full Cases Dashboard + Case Detail view**, wired to your Cybersystems DB and core‑intel pipeline, with the same liability‑safe tone you wanted.
