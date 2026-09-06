@@ -1,0 +1,251 @@
+1. Backend structure
+text
+jroc-backend/
+├── main.py
+├── auth.py
+├── models.py
+├── database.py
+├── schemas.py
+├── requirements.txt
+└── .env
+2. requirements.txt
+text
+fastapi
+uvicorn[standard]
+python-dotenv
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
+3. database + models
+database.py
+
+python
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+DATABASE_URL = "sqlite:///./jroc.db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+models.py
+
+python
+from sqlalchemy import Column, Integer, String
+from .database import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    role = Column(String, default="user")
+4. schemas
+schemas.py
+
+python
+from pydantic import BaseModel, EmailStr
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class ContactMessage(BaseModel):
+    name: str
+    email: EmailStr
+    message: str
+5. auth (JWT, register, login)
+auth.py
+
+python
+import os
+from datetime import datetime, timedelta
+from jose import jwt, JWTError
+from passlib.hash import bcrypt
+from fastapi import Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+
+from .database import SessionLocal
+from .models import User
+
+SECRET_KEY = os.getenv("JROC_SECRET", "devsecret")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_HOURS = 12
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hash(password)
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.verify(password, hashed)
+6. main FastAPI app with endpoints
+main.py
+
+python
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+
+from .database import Base, engine
+from .models import User
+from .schemas import UserCreate, UserLogin, ContactMessage
+from .auth import (
+    get_db,
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user,
+)
+
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="J-Roc Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ---------- AUTH ----------
+
+@app.post("/auth/register")
+def register(body: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == body.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    user = User(
+        email=body.email,
+        password_hash=hash_password(body.password),
+        role="user",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {"id": user.id, "email": user.email, "role": user.role}
+
+
+@app.post("/auth/login")
+def login(body: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = create_access_token({"sub": user.email, "role": user.role})
+    return {"access_token": token, "token_type": "bearer", "role": user.role}
+
+
+# ---------- CONTACT ----------
+
+@app.post("/contact")
+def contact(body: ContactMessage):
+    # In real use: store in DB or send email
+    # Here: just acknowledge, no promises, no liability
+    return {
+        "status": "received",
+        "message": "Your message has been received. This response is informational only and does not create any obligation or relationship."
+    }
+
+
+# ---------- STATIC CONTENT (FAQ / PRIVACY / TERMS) ----------
+
+@app.get("/content/faq")
+def faq():
+    return {
+        "items": [
+            {
+                "q": "Is this legal advice?",
+                "a": "No. Nothing from this site or system is legal advice. It is AI-assisted content only."
+            },
+            {
+                "q": "Can I rely on AI output?",
+                "a": "Treat all AI output as draft material. Verify facts and consult professionals before acting."
+            },
+            {
+                "q": "Who is responsible for decisions I make?",
+                "a": "You are. J-Roc Cybersystems is not liable for decisions or outcomes based on this content."
+            },
+        ]
+    }
+
+
+@app.get("/content/privacy")
+def privacy():
+    return {
+        "text": (
+            "This service may collect basic technical data to operate and improve the platform. "
+            "Do not submit highly sensitive personal, financial, or legal information. "
+            "Use is at your own discretion."
+        )
+    }
+
+
+@app.get("/content/terms")
+def terms():
+    return {
+        "text": (
+            "By using this site, you agree that all content is provided 'as-is' without guarantees. "
+            "AI-generated output may be incomplete, inaccurate, or outdated. "
+            "You accept full responsibility for how you use the platform and any decisions you make. "
+            "J-Roc Cybersystems is not liable for losses, damages, or consequences arising from your use."
+        )
+    }
+7. Wiring frontend to backend (high level)
+Contact page: POST to /contact
+
+FAQ page: optionally fetch from /content/faq instead of hardcoding
+
+Privacy / Terms pages: optionally fetch from /content/privacy and /content/terms
+
+You already have strong liability language on the frontend; this backend mirrors that tone and makes sure nothing looks like a guarantee or professional advice.
+
+If you want, next step can be: hook this backend into your Hermis stack and J‑Roc Core Intelligence Engine, but for “website + legal + not held liable,” this backend is enough to stand behind the frontend you’ve got.
