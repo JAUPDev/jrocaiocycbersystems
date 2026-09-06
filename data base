@@ -1,0 +1,380 @@
+ready to plug into your existing endpoints and Hermis core‑intel engine.
+  Here’s how to actually **plug that Cybersystems DB into your existing endpoints and Hermis core‑intel engine**—so it’s not just schema, it’s live.
+
+---
+
+### 1. Use the new models in your Core Intelligence Engine
+
+In your existing `core_intel/engine.py`, swap to the Cybersystems models:
+
+```python
+from database import SessionLocal
+from models import Case, Action, Result, OsintScan, LegalCase
+from services.osint.engine import run_osint
+from services.legal.engine import create_legal_case, LegalRequest
+from services.ai.core import ai_generate
+
+async def run_core_intel(req):
+    db = SessionLocal()
+
+    # 1) Create Case
+    case = Case(
+        title=f"Intel: {req.query}",
+        description=f"Mode: {req.mode}",
+        org_id=req.org_id,
+        owner_id=req.user_id,
+    )
+    db.add(case)
+    db.commit()
+    db.refresh(case)
+
+    # 2) OSINT Action
+    osint_action = Action(
+        case_id=case.id,
+        tool_name="osint_scan",
+        category="osint",
+        input_payload=req.query,
+    )
+    db.add(osint_action)
+    db.commit()
+    db.refresh(osint_action)
+
+    osint_data = await run_osint(req.query)
+
+    osint_scan = OsintScan(
+        action_id=osint_action.id,
+        query=req.query,
+        source="external",
+        abstract=osint_data.get("abstract"),
+        related=json.dumps(osint_data.get("related", [])),
+    )
+    db.add(osint_scan)
+
+    osint_summary = await ai_generate(
+        prompt=f"Summarize OSINT findings:\n{json.dumps(osint_data)}"
+    )
+
+    osint_result = Result(
+        action_id=osint_action.id,
+        summary_text=osint_summary,
+        raw_data=json.dumps(osint_data),
+    )
+    db.add(osint_result)
+    db.commit()
+    db.refresh(osint_result)
+
+    # 3) Optional Legal
+    legal_payload = None
+    if req.mode in ("legal", "hybrid") and req.legal:
+        legal_action = Action(
+            case_id=case.id,
+            tool_name="legal_case",
+            category="legal",
+            input_payload=json.dumps(req.legal),
+        )
+        db.add(legal_action)
+        db.commit()
+        db.refresh(legal_action)
+
+        legal_req = LegalRequest(
+            case_title=req.legal.get("case_title", f"Legal for {req.query}"),
+            description=req.legal.get("description", "Auto-generated legal context."),
+            category=req.legal.get("category", "compliance"),
+        )
+        legal_case_data = create_legal_case(legal_req)
+
+        legal_case = LegalCase(
+            action_id=legal_action.id,
+            case_title=legal_req.case_title,
+            description=legal_req.description,
+            category=legal_req.category,
+        )
+        db.add(legal_case)
+
+        legal_summary = await ai_generate(
+            prompt=f"Summarize legal context:\n{json.dumps(legal_case_data)}"
+        )
+
+        legal_result = Result(
+            action_id=legal_action.id,
+            summary_text=legal_summary,
+            raw_data=json.dumps(legal_case_data),
+        )
+        db.add(legal_result)
+        db.commit()
+        db.refresh(legal_result)
+
+        legal_payload = legal_case_data
+
+    # 4) Global summary
+    combined_text = "\n\n".join(
+        [
+            f"[OSINT] {osint_result.summary_text}",
+            f"[LEGAL] {legal_result.summary_text}" if req.mode in ("legal", "hybrid") and req.legal else "",
+        ]
+    )
+
+    global_summary = await ai_generate(
+        prompt=f"Create a unified intelligence brief:\n{combined_text}"
+    )
+
+    db.close()
+
+    return {
+        "case_id": case.id,
+        "query": req.query,
+        "mode": req.mode,
+        "osint": osint_data,
+        "legal": legal_payload,
+        "global_summary": global_summary,
+    }
+```
+
+---
+
+### 2. Your `/api/v1/core-intel/run` endpoint already plugs in
+
+In your FastAPI router:
+
+```python
+@router.post("/run")
+async def run_core(body: CoreIntelBody, user = Depends(require_role("admin", "analyst", "legal"))):
+    req = IntelligenceRequest(
+        query=body.query,
+        mode=body.mode,
+        legal=body.legal,
+        org_id=user.org_id,
+        user_id=user.id,
+    )
+    result = await run_core_intel(req)
+    return result
+```
+
+Hermis calls this endpoint via the **core_intel skill**, and the engine now writes:
+
+- `Case`  
+- `Action`  
+- `Result`  
+- `OsintScan`  
+- `LegalCase`  
+
+into the Cybersystems DB.
+
+---
+
+### 3. Hermis is already wired
+
+Your Hermis skill:
+
+```json
+{
+  "name": "jroc_core_intel",
+  "action": {
+    "type": "http",
+    "method": "POST",
+    "url": "http://localhost:8000/api/v1/core-intel/run",
+    "headers": {
+      "Authorization": "Bearer {{env.JROC_ADMIN_TOKEN}}"
+    }
+  }
+}
+```
+
+Your autonomous agent calls that skill or endpoint; the DB schema now gives it a **real memory** of:
+
+- Every case  
+- Every action taken  
+- Every result generated  
+
+So yes—this DB is **ready to plug into your existing endpoints and Hermis core‑intel engine**. If you want, next step can be a **simple “Cases” page on the frontend** to list and view these stored intel runs.
+### Full J‑Roc Cybersystems DB schema
+
+Here’s a **full intelligence‑grade database** for J‑Roc Cybersystems—built to support:
+
+- Users, orgs, roles  
+- Cases, actions, results  
+- OSINT scans  
+- Legal cases  
+- Audit logs  
+
+All in one schema, ready for FastAPI + SQLAlchemy.
+
+---
+
+### 1. Base + engine
+
+```python
+# database.py
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+DATABASE_URL = "sqlite:///./cybersystems.db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+```
+
+---
+
+### 2. Core models
+
+```python
+# models.py
+from sqlalchemy import (
+    Column, Integer, String, Text, DateTime, ForeignKey, Boolean
+)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from .database import Base
+
+class Org(Base):
+    __tablename__ = "orgs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    users = relationship("User", back_populates="org")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(Integer, ForeignKey("orgs.id"), nullable=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    role = Column(String, default="user")  # user, admin, analyst, legal, osint
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    org = relationship("Org", back_populates="users")
+    cases = relationship("Case", back_populates="owner")
+
+
+class Case(Base):
+    __tablename__ = "cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    org_id = Column(Integer, ForeignKey("orgs.id"), nullable=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, index=True)
+    description = Column(Text)
+    status = Column(String, default="open")  # open, closed, archived
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    org = relationship("Org")
+    owner = relationship("User", back_populates="cases")
+    actions = relationship("Action", back_populates="case")
+
+
+class Action(Base):
+    __tablename__ = "actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    case_id = Column(Integer, ForeignKey("cases.id"))
+    tool_name = Column(String)  # "osint_scan", "legal_case", "core_intel"
+    category = Column(String)   # "osint", "legal", "intel"
+    input_payload = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    case = relationship("Case", back_populates="actions")
+    result = relationship("Result", back_populates="action", uselist=False)
+
+
+class Result(Base):
+    __tablename__ = "results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action_id = Column(Integer, ForeignKey("actions.id"))
+    summary_text = Column(Text)
+    raw_data = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    action = relationship("Action", back_populates="result")
+```
+
+---
+
+### 3. OSINT + Legal detail tables
+
+```python
+class OsintScan(Base):
+    __tablename__ = "osint_scans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action_id = Column(Integer, ForeignKey("actions.id"))
+    query = Column(String, index=True)
+    source = Column(String, default="external")
+    abstract = Column(Text)
+    related = Column(Text)  # JSON string
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    action = relationship("Action")
+
+
+class LegalCase(Base):
+    __tablename__ = "legal_cases"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action_id = Column(Integer, ForeignKey("actions.id"))
+    case_title = Column(String, index=True)
+    description = Column(Text)
+    category = Column(String)  # contract, compliance, dispute, etc.
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    action = relationship("Action")
+```
+
+---
+
+### 4. Contact + static content + audit
+
+```python
+class ContactMessage(Base):
+    __tablename__ = "contact_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    email = Column(String)
+    message = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class StaticContent(Base):
+    __tablename__ = "static_content"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True)  # "privacy", "terms", "faq"
+    content = Column(Text)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    event = Column(String)
+    detail = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")
+```
+
+---
+
+### 5. Init
+
+```python
+# in main.py
+from .database import Base, engine
+from .models import (
+    Org, User, Case, Action, Result,
+    OsintScan, LegalCase,
+    ContactMessage, StaticContent, AuditLog
+)
+
+Base.metadata.create_all(bind=engine)
+```
